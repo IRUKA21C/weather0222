@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>전국 실시간 날씨</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons for premium iconography -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Pretendard Font for elegant typography -->
+    <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
+            margin: 0;
+            overflow-x: hidden;
+        }
+        
+        /* Glassmorphism utilities */
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            box-shadow: 0 20px 40px -10px rgba(0, 100, 200, 0.15);
+        }
+        
+        .glass-item {
+            background: rgba(255, 255, 255, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        }
+
+        /* Hide scrollbar for clean UI but allow scrolling */
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in {
+            animation: fadeIn 0.8s ease-out forwards;
+        }
+        .delay-100 { animation-delay: 0.1s; }
+        .delay-200 { animation-delay: 0.2s; }
+        .delay-300 { animation-delay: 0.3s; }
+    </style>
+</head>
+<body class="bg-blue-50 text-gray-800 min-h-screen flex items-center justify-center relative sm:p-6 p-0">
+    
+    <!-- Atmospheric Background Image -->
+    <div class="fixed inset-0 z-0">
+        <img src="https://images.unsplash.com/photo-1601297183305-6df142704ea2?q=80&w=2000&auto=format&fit=crop" 
+             alt="Bright sky background" 
+             class="w-full h-full object-cover opacity-60 mix-blend-multiply scale-105" id="bg-image">
+        <div class="absolute inset-0 bg-gradient-to-br from-blue-100/80 via-white/60 to-sky-200/80"></div>
+    </div>
+
+    <!-- Main Widget Container -->
+    <main class="relative z-10 w-full max-w-md h-[100dvh] sm:h-auto sm:min-h-[750px] sm:rounded-[2.5rem] glass-panel p-8 flex flex-col transition-all duration-500 overflow-hidden">
+        
+        <!-- Loading State -->
+        <div id="loading-state" class="absolute inset-0 flex flex-col items-center justify-center bg-white/70 backdrop-blur-sm z-20">
+            <i data-lucide="loader-2" class="w-12 h-12 animate-spin text-blue-500 mb-4"></i>
+            <p class="text-gray-600 font-medium tracking-widest text-sm animate-pulse">기상청 데이터를 연동 중입니다...</p>
+        </div>
+
+        <!-- Error State -->
+        <div id="error-state" class="hidden absolute inset-0 flex-col items-center justify-center bg-white/95 z-20 p-8 text-center">
+            <i data-lucide="alert-circle" class="w-16 h-16 text-red-500 mb-4"></i>
+            <h2 class="text-xl font-bold text-gray-800 mb-2">정보를 불러올 수 없습니다</h2>
+            <p id="error-message" class="text-gray-500 text-sm font-medium leading-relaxed mb-6"></p>
+            <button onclick="fetchWeatherData()" class="px-6 py-2 rounded-full border border-gray-300 hover:bg-gray-100 transition-colors text-sm font-medium text-gray-700">다시 시도</button>
+        </div>
+
+        <!-- Weather Content -->
+        <div id="weather-content" class="hidden flex-col h-full opacity-0">
+            
+            <!-- Header: Location Search & Current Time -->
+            <header class="flex justify-between items-start mb-8 animate-fade-in">
+                <div class="flex-1 pr-4">
+                    <div class="relative flex items-center mb-3 bg-white/50 rounded-2xl border border-white/80 shadow-sm px-4 py-3 focus-within:ring-2 focus-within:ring-blue-400 focus-within:bg-white/80 transition-all">
+                        <i data-lucide="search" class="w-5 h-5 text-blue-500 mr-3"></i>
+                        <input type="text" id="search-input" placeholder="지역 검색 (예: 사당동, 제주)" 
+                               class="bg-transparent border-none outline-none text-lg font-bold text-gray-800 placeholder-gray-400 w-full focus:ring-0"
+                               onkeypress="if(event.key === 'Enter') searchLocation()">
+                        <button onclick="searchLocation()" class="ml-2 p-1 text-gray-400 hover:text-blue-500 transition-colors">
+                            <i data-lucide="arrow-right" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+                    <div class="flex items-center gap-2 px-1">
+                        <i data-lucide="map-pin" class="w-4 h-4 text-blue-500"></i>
+                        <p id="current-location-display" class="text-gray-700 font-bold text-lg">서울</p>
+                        <span class="text-gray-300">|</span>
+                        <p id="current-time-display" class="text-gray-500 font-medium text-sm">오늘, 15:00 기준</p>
+                    </div>
+                </div>
+                <button onclick="fetchWeatherData()" class="p-3 rounded-full bg-white/60 shadow-sm border border-white/80 hover:bg-white transition-colors flex-shrink-0 mt-1" title="새로고침">
+                    <i data-lucide="refresh-cw" class="w-5 h-5 text-blue-500"></i>
+                </button>
+            </header>
+
+            <!-- Hero: Main Temperature & Icon -->
+            <section class="flex flex-col items-center justify-center flex-grow mb-12 animate-fade-in delay-100">
+                <div id="main-weather-icon" class="mb-6 drop-shadow-md text-gray-800">
+                    <!-- Icon injected via JS -->
+                </div>
+                <div class="relative flex items-start text-gray-800">
+                    <span id="main-temp" class="text-[6.5rem] font-medium leading-none tracking-tighter">--</span>
+                    <span class="text-5xl font-light mt-2 absolute -right-12">°</span>
+                </div>
+                <p id="main-desc" class="text-2xl font-bold mt-4 text-gray-700 tracking-wide">--</p>
+            </section>
+
+            <!-- Grid: Weather Details -->
+            <section class="grid grid-cols-3 gap-3 mb-8 animate-fade-in delay-200">
+                <div class="glass-item rounded-2xl p-4 flex flex-col items-center justify-center gap-2">
+                    <i data-lucide="droplets" class="w-6 h-6 text-blue-500"></i>
+                    <span id="detail-pop" class="text-lg font-bold text-gray-800">-%</span>
+                    <span class="text-xs text-gray-500 font-medium">강수확률</span>
+                </div>
+                <div class="glass-item rounded-2xl p-4 flex flex-col items-center justify-center gap-2">
+                    <i data-lucide="wind" class="w-6 h-6 text-emerald-500"></i>
+                    <span id="detail-wsd" class="text-lg font-bold text-gray-800">-m/s</span>
+                    <span class="text-xs text-gray-500 font-medium">풍속</span>
+                </div>
+                <div class="glass-item rounded-2xl p-4 flex flex-col items-center justify-center gap-2">
+                    <i data-lucide="waves" class="w-6 h-6 text-cyan-500"></i>
+                    <span id="detail-reh" class="text-lg font-bold text-gray-800">-%</span>
+                    <span class="text-xs text-gray-500 font-medium">습도</span>
+                </div>
+            </section>
+
+            <!-- Hourly Forecast (Horizontal Scroll) -->
+            <section class="animate-fade-in delay-300 mt-auto">
+                <div class="flex items-center justify-between mb-4 px-1">
+                    <h3 class="text-sm font-bold text-gray-600">시간대별 예보</h3>
+                    <i data-lucide="chevron-right" class="w-4 h-4 text-gray-400"></i>
+                </div>
+                <div class="flex gap-4 overflow-x-auto hide-scrollbar pb-2" id="hourly-forecast">
+                    <!-- Hourly items injected via JS -->
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        // Constants for KMA API
+        const SERVICE_KEY = '4495bf8447dcfc74103d6410450c4f325f184dab177e624576deea23feadb89e';
+        
+        // Current State
+        let currentCityName = '서울';
+        let currentNx = 60;
+        let currentNy = 127;
+
+        // KMA Grid Conversion Formula (Lat/Lon to Nx/Ny)
+        function dfs_xy_conv(code, v1, v2) {
+            const RE = 6371.00877; // Earth radius (km)
+            const GRID = 5.0;      // Grid spacing (km)
+            const SLAT1 = 30.0;    // Standard latitude 1
+            const SLAT2 = 60.0;    // Standard latitude 2
+            const OLON = 126.0;    // Standard longitude
+            const OLAT = 38.0;     // Standard latitude
+            const XO = 43;         // Base X
+            const YO = 136;        // Base Y
+
+            const DEGRAD = Math.PI / 180.0;
+            const re = RE / GRID;
+            const slat1 = SLAT1 * DEGRAD;
+            const slat2 = SLAT2 * DEGRAD;
+            const olon = OLON * DEGRAD;
+            const olat = OLAT * DEGRAD;
+
+            let sn = Math.tan(Math.PI * 0.25 + slat2 * 0.5) / Math.tan(Math.PI * 0.25 + slat1 * 0.5);
+            sn = Math.log(Math.cos(slat1) / Math.cos(slat2)) / Math.log(sn);
+            let sf = Math.tan(Math.PI * 0.25 + slat1 * 0.5);
+            sf = Math.pow(sf, sn) * Math.cos(slat1) / sn;
+            let ro = Math.tan(Math.PI * 0.25 + olat * 0.5);
+            ro = re * sf / Math.pow(ro, sn);
+            
+            const rs = {};
+            if (code === "toXY") {
+                rs['lat'] = v1;
+                rs['lng'] = v2;
+                let ra = Math.tan(Math.PI * 0.25 + (v1) * DEGRAD * 0.5);
+                ra = re * sf / Math.pow(ra, sn);
+                let theta = v2 * DEGRAD - olon;
+                if (theta > Math.PI) theta -= 2.0 * Math.PI;
+                if (theta < -Math.PI) theta += 2.0 * Math.PI;
+                theta *= sn;
+                rs['x'] = Math.floor(ra * Math.sin(theta) + XO + 0.5);
+                rs['y'] = Math.floor(ro - ra * Math.cos(theta) + YO + 0.5);
+            }
+            return rs;
+        }
+
+        // Search Location using OpenStreetMap Nominatim
+        async function searchLocation() {
+            const query = document.getElementById('search-input').value.trim();
+            if (!query) return;
+
+            // UI changes for loading
+            document.getElementById('loading-state').style.display = 'flex';
+            document.getElementById('error-state').style.display = 'none';
+
+            try {
+                // Fetch coordinates for the query (Scoped to South Korea for accuracy)
+                const searchUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query + ' 대한민국')}&format=json&limit=1`;
+                const response = await fetch(searchUrl);
+                const data = await response.json();
+
+                if (data && data.length > 0) {
+                    const lat = parseFloat(data[0].lat);
+                    const lon = parseFloat(data[0].lon);
+                    
+                    // Convert Lat/Lon to KMA Grid
+                    const grid = dfs_xy_conv("toXY", lat, lon);
+                    
+                    currentCityName = query;
+                    currentNx = grid.x;
+                    currentNy = grid.y;
+                    
+                    document.getElementById('search-input').value = '';
+                    document.getElementById('search-input').blur();
+                    
+                    fetchWeatherData();
+                } else {
+                    throw new Error("검색 결과가 없습니다. 동/읍/면 단위로 정확히 입력해보세요.");
+                }
+            } catch (error) {
+                console.error("Geocoding Error:", error);
+                document.getElementById('loading-state').style.display = 'none';
+                document.getElementById('error-state').style.display = 'flex';
+                document.getElementById('error-message').textContent = error.message;
+                document.getElementById('weather-content').style.display = 'none';
+            }
+        }
+
+        /**
+         * Calculate base_date and base_time for getVilageFcst
+         * API provides data 8 times a day: 0200, 0500, 0800, 1100, 1400, 1700, 2000, 2300.
+         */
+        function getBaseDateTime() {
+            const now = new Date();
+            let year = now.getFullYear();
+            let month = now.getMonth() + 1;
+            let date = now.getDate();
+            let hours = now.getHours();
+            let minutes = now.getMinutes();
+
+            // API is updated roughly 10 minutes after the base time.
+            // If current time is before the update, we must use the previous base time.
+            let baseHours;
+            if (hours < 2 || (hours === 2 && minutes < 10)) {
+                // Fetch previous day's 23:00 data
+                const yesterday = new Date(now);
+                yesterday.setDate(yesterday.getDate() - 1);
+                year = yesterday.getFullYear();
+                month = yesterday.getMonth() + 1;
+                date = yesterday.getDate();
+                baseHours = 23;
+            } else if (hours < 5 || (hours === 5 && minutes < 10)) baseHours = 2;
+            else if (hours < 8 || (hours === 8 && minutes < 10)) baseHours = 5;
+            else if (hours < 11 || (hours === 11 && minutes < 10)) baseHours = 8;
+            else if (hours < 14 || (hours === 14 && minutes < 10)) baseHours = 11;
+            else if (hours < 17 || (hours === 17 && minutes < 10)) baseHours = 14;
+            else if (hours < 20 || (hours === 20 && minutes < 10)) baseHours = 17;
+            else if (hours < 23 || (hours === 23 && minutes < 10)) baseHours = 20;
+            else baseHours = 23;
+
+            const baseDate = `${year}${String(month).padStart(2, '0')}${String(date).padStart(2, '0')}`;
+            const baseTime = `${String(baseHours).padStart(2, '0')}00`;
+
+            return { baseDate, baseTime };
+        }
+
+        /**
+         * Determine icon and text based on Sky(SKY) and Precipitation(PTY) codes
+         */
+        function getWeatherMeta(sky, pty, timeStr) {
+            const hour = parseInt(timeStr.substring(0, 2), 10);
+            const isNight = hour >= 19 || hour < 6;
+
+            if (pty === '1' || pty === '4') return { text: '비', icon: 'cloud-rain', color: 'text-blue-500' };
+            if (pty === '2') return { text: '비와 눈', icon: 'cloud-snow', color: 'text-indigo-500' };
+            if (pty === '3') return { text: '눈', icon: 'snowflake', color: 'text-sky-500' };
+            
+            if (sky === '1') return isNight 
+                ? { text: '맑음', icon: 'moon', color: 'text-indigo-400' } 
+                : { text: '맑음', icon: 'sun', color: 'text-amber-500' };
+            if (sky === '3') return isNight 
+                ? { text: '구름 많음', icon: 'cloud-moon', color: 'text-gray-500' } 
+                : { text: '구름 많음', icon: 'cloud-sun', color: 'text-gray-400' };
+            if (sky === '4') return { text: '흐림', icon: 'cloud', color: 'text-gray-500' };
+            
+            return { text: '알 수 없음', icon: 'cloud', color: 'text-gray-400' };
+        }
+
+        /**
+         * Main function to fetch and display data
+         */
+        async function fetchWeatherData() {
+            // UI States
+            document.getElementById('loading-state').style.display = 'flex';
+            document.getElementById('error-state').style.display = 'none';
+            document.getElementById('weather-content').style.display = 'none';
+            document.getElementById('weather-content').classList.remove('animate-fade-in');
+
+            try {
+                const { baseDate, baseTime } = getBaseDateTime();
+                const url = `https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst?serviceKey=${SERVICE_KEY}&pageNo=1&numOfRows=500&dataType=JSON&base_date=${baseDate}&base_time=${baseTime}&nx=${currentNx}&ny=${currentNy}`;
+
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                
+                const data = await response.json();
+                
+                // KMA API Error handling (sometimes returns normal HTTP status but error in header)
+                if (data.response.header.resultCode !== '00') {
+                    throw new Error(data.response.header.resultMsg || "기상청 서버 에러");
+                }
+
+                const items = data.response.body.items.item;
+                if (!items || items.length === 0) throw new Error("예보 데이터가 없습니다.");
+
+                // Group data by DateTime (fcstDate + fcstTime)
+                const groupedData = {};
+                items.forEach(item => {
+                    const dtKey = `${item.fcstDate}${item.fcstTime}`;
+                    if (!groupedData[dtKey]) {
+                        // Parse string date to JS Date object for sorting/comparison
+                        const year = parseInt(item.fcstDate.substring(0, 4));
+                        const month = parseInt(item.fcstDate.substring(4, 6)) - 1;
+                        const day = parseInt(item.fcstDate.substring(6, 8));
+                        const hour = parseInt(item.fcstTime.substring(0, 2));
+                        groupedData[dtKey] = {
+                            date: item.fcstDate,
+                            time: item.fcstTime,
+                            timestamp: new Date(year, month, day, hour, 0, 0).getTime()
+                        };
+                    }
+                    groupedData[dtKey][item.category] = item.fcstValue;
+                });
+
+                // Convert to array and sort chronologically
+                let forecasts = Object.values(groupedData).sort((a, b) => a.timestamp - b.timestamp);
+
+                // Filter out past forecasts based on current time
+                const nowTimestamp = new Date().getTime();
+                // Find index of the forecast closest to current time (or future)
+                let currentIndex = forecasts.findIndex(f => f.timestamp >= nowTimestamp - (60 * 60 * 1000)); 
+                if (currentIndex === -1) currentIndex = 0; // Fallback
+
+                // Get current weather and next 12 hours
+                const currentForecast = forecasts[currentIndex];
+                const hourlyForecasts = forecasts.slice(currentIndex, currentIndex + 12);
+
+                updateUI(currentForecast, hourlyForecasts);
+
+            } catch (error) {
+                console.error("Weather Fetch Error:", error);
+                document.getElementById('loading-state').style.display = 'none';
+                document.getElementById('error-state').style.display = 'flex';
+                document.getElementById('error-message').textContent = "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요.\n(" + error.message + ")";
+            }
+        }
+
+        /**
+         * Update DOM elements with parsed data
+         */
+        function updateUI(current, hourlyList) {
+            // Meta calculations
+            const meta = getWeatherMeta(current.SKY, current.PTY, current.time);
+            
+            // Header
+            const now = new Date();
+            const days = ['일', '월', '화', '수', '목', '금', '토'];
+            document.getElementById('current-location-display').textContent = currentCityName;
+            document.getElementById('current-time-display').textContent = 
+                `${now.getMonth()+1}월 ${now.getDate()}일 (${days[now.getDay()]}) ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+            // Hero Section
+            document.getElementById('main-weather-icon').innerHTML = `<i data-lucide="${meta.icon}" class="w-24 h-24 ${meta.color}"></i>`;
+            document.getElementById('main-temp').textContent = current.TMP;
+            document.getElementById('main-desc').textContent = meta.text;
+
+            // Details Grid
+        document.getElementById('detail-pop').textContent = current.POP + '%';
+        document.getElementById('detail-wsd').textContent = current.WSD + 'm/s';
+        document.getElementById('detail-reh').textContent = current.REH + '%';
+
+        // Hourly List
+        const hourlyContainer = document.getElementById('hourly-forecast');
+        hourlyContainer.innerHTML = ''; // Clear previous
+
+        hourlyList.forEach((forecast, index) => {
+            const hourStr = forecast.time.substring(0, 2);
+            const isNow = index === 0;
+            const timeLabel = isNow ? '지금' : `${parseInt(hourStr)}시`;
+            const itemMeta = getWeatherMeta(forecast.SKY, forecast.PTY, forecast.time);
+
+            const div = document.createElement('div');
+            div.className = `flex flex-col items-center justify-center min-w-[75px] py-4 rounded-2xl ${isNow ? 'bg-white border-2 border-blue-100 shadow-md' : 'glass-item'}`;
+            div.innerHTML = `
+                <span class="text-sm font-bold text-gray-500 mb-2">${timeLabel}</span>
+                <i data-lucide="${itemMeta.icon}" class="w-7 h-7 mb-2 ${itemMeta.color}"></i>
+                <span class="text-xl font-bold text-gray-800">${forecast.TMP}°</span>
+                <span class="text-xs font-semibold text-blue-500 mt-1 h-4">${forecast.POP > 0 ? forecast.POP+'%' : ''}</span>
+            `;
+            hourlyContainer.appendChild(div);
+        });
+
+        // Re-initialize icons for newly injected HTML
+        lucide.createIcons();
+
+        // Transition UI
+            document.getElementById('loading-state').style.display = 'none';
+            const content = document.getElementById('weather-content');
+            content.style.display = 'flex';
+            // Trigger reflow to restart animation
+            void content.offsetWidth;
+            content.classList.add('animate-fade-in');
+            content.style.opacity = '1';
+        }
+
+        // Initialize App
+        document.addEventListener('DOMContentLoaded', fetchWeatherData);
+
+    </script>
+</body>
+</html>
